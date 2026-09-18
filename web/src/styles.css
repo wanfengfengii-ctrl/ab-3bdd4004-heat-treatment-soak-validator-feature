@@ -1,0 +1,240 @@
+:root {
+  color-scheme: light;
+  font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #f4f5f7;
+  color: #1c2333;
+}
+
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 4rem;
+}
+
+h1 {
+  font-size: 1.5rem;
+  margin: 0 0 0.75rem;
+}
+
+.hint {
+  color: #5a6372;
+  line-height: 1.7;
+  margin: 0 0 1.5rem;
+}
+
+.upload {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  background: #fff;
+  border: 1px solid #e2e5ea;
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+}
+
+.upload input[type="text"] {
+  border: 1px solid #cfd4dc;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  padding: 0.45rem 0.6rem;
+  width: 11rem;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 19rem;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 760px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.upload label {
+  font-weight: 600;
+}
+
+.upload button {
+  background: #1f6feb;
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.95rem;
+  padding: 0.55rem 1.4rem;
+}
+
+.upload button:disabled {
+  background: #9db8e8;
+  cursor: wait;
+}
+
+.banner {
+  border-radius: 10px;
+  margin-top: 1.25rem;
+  padding: 1rem 1.25rem;
+}
+
+.banner.error {
+  background: #fdecea;
+  border: 1px solid #f5b7b1;
+  color: #8f1d14;
+}
+
+.banner.verdict h2 {
+  font-size: 1.2rem;
+  margin: 0 0 0.75rem;
+}
+
+.banner.verdict.qualified {
+  background: #e8f7ee;
+  border: 1px solid #9fdcb4;
+}
+
+.banner.verdict.unqualified {
+  background: #fff6e5;
+  border: 1px solid #f0cf8e;
+}
+
+.banner.verdict dl {
+  margin: 0;
+}
+
+.banner.verdict .row {
+  display: flex;
+  gap: 1rem;
+  padding: 0.3rem 0;
+}
+
+.banner.verdict dt {
+  color: #5a6372;
+  min-width: 7.5rem;
+}
+
+.banner.verdict dd {
+  font-weight: 600;
+  margin: 0;
+}
+
+.banner.verdict .raw {
+  color: #5a6372;
+  font-weight: 400;
+  margin-left: 0.4rem;
+}
+
+.verdict-source {
+  color: #5a6372;
+  font-size: 0.9rem;
+  margin: 0 0 0.75rem;
+}
+
+/* ---- 最近记录侧栏：空态/错误只留在列表区域 ---- */
+
+.side .history {
+  background: #fbfcfe;
+  border: 1px solid #e2e5ea;
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+}
+
+.history h2 {
+  font-size: 1.05rem;
+  margin: 0 0 0.75rem;
+}
+
+.history-hint {
+  color: #8a93a2;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.history-error {
+  margin-top: 0;
+  padding: 0.75rem 1rem;
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.history-item {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #e2e5ea;
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.6rem 0.7rem;
+  text-align: left;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+}
+
+.history-item:hover {
+  border-color: #1f6feb;
+}
+
+.history-item:focus-visible {
+  outline: 2px solid #1f6feb;
+  outline-offset: 1px;
+}
+
+.history-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.history-name {
+  font-weight: 600;
+}
+
+.history-meta {
+  color: #5a6372;
+  font-size: 0.82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-time {
+  color: #5a6372;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.badge {
+  border-radius: 999px;
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.15rem 0.55rem;
+}
+
+.badge.ok {
+  background: #d9f2e2;
+  color: #1c6b35;
+}
+
+.badge.ng {
+  background: #fde4cf;
+  color: #97530c;
+}

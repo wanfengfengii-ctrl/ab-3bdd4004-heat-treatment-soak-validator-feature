@@ -1,0 +1,8 @@
+# verify 服务的构建上下文是仓库根，排除依赖与产物
+.git
+**/node_modules
+**/dist
+**/__pycache__
+**/.pytest_cache
+e2e/test-results
+e2e/playwright-report

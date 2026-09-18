@@ -1,0 +1,54 @@
+services:
+  api:
+    build: ./api
+    # 仅对 compose 内部网络暴露，不发布宿主端口
+    expose:
+      - "8000"
+    # SQLite 历史库落在命名卷：服务重启/重建后最近记录仍可回看
+    volumes:
+      - api-history:/app/data
+    healthcheck:
+      # 用 127.0.0.1 而非 localhost：避免容器内 localhost 双栈解析差异
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  web:
+    build: ./web
+    # 只发布前端端口，宿主端口可由 WEB_PORT 覆盖
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      # 必须用 127.0.0.1：busybox wget 把 localhost 解析为 ::1 后不会回退
+      # IPv4，而 nginx 仅监听 IPv4，用 localhost 会让健康检查永远失败
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  # 一次性验收服务：跑通 pytest / vitest / playwright 后退出
+  verify:
+    build:
+      context: .
+      dockerfile: verify/Dockerfile
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      WEB_BASE_URL: http://web
+    volumes:
+      # 端到端判据通过宿主套接字真实重启 api，验证重启后历史仍可回看
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  api-history:
