@@ -204,8 +204,11 @@ def test_history_summary_shape(client):
     item = c.get("/api/history").json()["items"][0]
     assert set(item.keys()) == {
         "id", "heatNo", "filename", "analyzedAt", "qualified", "recordCount",
+        "analysisMode",
     }
     assert item["recordCount"] == 61
+    # 未显式带模式的旧请求按严格判定落库与展示
+    assert item["analysisMode"] == "strict"
 
 
 def test_write_failure_returns_clear_error_and_no_partial_record(client, monkeypatch):
@@ -292,3 +295,62 @@ def test_reopen_database_history_survives_new_connection(client):
         assert item["conclusion"]["qualified"] is True
     finally:
         conn.close()
+
+
+def test_linear_mode_conclusion_persisted_with_mode_and_equivalent(client):
+    """等效模式成功分析：快照记录判定模式与等效秒，可按 id 完整恢复。"""
+    c, _ = client
+    records = [{"t": i * 30, "temp": 860} for i in range(31)]  # 900 物理秒
+    body = json.dumps(records).encode()
+    resp = c.post(
+        "/api/analyze",
+        files={"file": ("linear.json", body, "application/json")},
+        data={"heat_no": "H-LIN", "analysis_mode": "linear_equivalent"},
+    )
+    assert resp.status_code == 200
+    history_id = resp.json()["historyId"]
+
+    detail = c.get(f"/api/history/{history_id}").json()
+    conclusion = detail["conclusion"]
+    assert conclusion["analysisMode"] == "linear_equivalent"
+    assert conclusion["qualified"] is True
+    assert conclusion["earliestQualifyingSegment"]["equivalentSeconds"] >= 1800
+
+    summary = c.get("/api/history").json()["items"][0]
+    assert summary["analysisMode"] == "linear_equivalent"
+
+
+def test_legacy_record_without_mode_read_as_strict(client):
+    """无 analysisMode 的旧结论（历史库中的旧记录）：摘要与详情都按严格判定读取。"""
+    c, db_path = client
+    # 直接写入一条旧格式结论（不含 analysisMode）模拟升级前落库的数据
+    legacy_conclusion = {
+        "recordCount": 61,
+        "segmentCount": 1,
+        "qualified": True,
+        "earliestQualifyingSegment": {
+            "startT": 0, "endT": 1800, "duration": 1800, "points": 61,
+        },
+        "longestSegment": {
+            "startT": 0, "endT": 1800, "duration": 1800, "points": 61,
+        },
+        "limits": {
+            "tempLow": 840.0, "tempHigh": 860.0,
+            "maxGapSeconds": 60, "minSoakSeconds": 1800,
+        },
+    }
+    conn = storage.connect(db_path)
+    try:
+        record_id = storage.insert_analysis(
+            conn, heat_no="H-OLD", filename="old.json",
+            conclusion=legacy_conclusion,
+        )
+    finally:
+        conn.close()
+
+    summary = c.get("/api/history").json()["items"][0]
+    assert summary["analysisMode"] == "strict"
+
+    detail = c.get(f"/api/history/{record_id}").json()
+    assert "analysisMode" not in detail["conclusion"]
+    assert detail["conclusion"]["qualified"] is True

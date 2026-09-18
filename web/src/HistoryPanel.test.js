@@ -51,11 +51,30 @@ describe("HistoryPanel 列表渲染", () => {
     expect(html).toContain("合格");
     expect(html).toContain("10 条记录");
     expect(html).toContain("61 条记录");
+    // 摘要标明判定方式（旧记录按严格判定）
+    expect(html).toContain("严格判定");
     // data-id 透传，供点击恢复使用
     expect(html).toContain('data-id="2"');
     expect(html).toContain('data-id="1"');
     // 倒序：更新的 id=2 排在前面
     expect(html.indexOf('data-id="2"')).toBeLessThan(html.indexOf('data-id="1"'));
+  });
+
+  it("线性等效模式记录在摘要中标明判定方式", () => {
+    const items = mapHistoryItems([
+      {
+        id: 9,
+        heatNo: "H-LIN",
+        filename: "lin.json",
+        analyzedAt: 0,
+        qualified: true,
+        recordCount: 100,
+        analysisMode: "linear_equivalent",
+      },
+    ]);
+    const html = render({ status: "ready", items, message: null });
+    expect(html).toContain("炉次 H-LIN");
+    expect(html).toContain("线性曲线等效保温");
   });
 
   it("后台刷新失败时保留旧列表并额外显示错误", () => {

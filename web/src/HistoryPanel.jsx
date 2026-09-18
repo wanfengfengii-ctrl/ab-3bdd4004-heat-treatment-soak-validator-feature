@@ -55,6 +55,7 @@ export default function HistoryPanel({ state, onSelect }) {
                   <span className="history-meta">
                     {item.filename}
                     {item.recordCountText ? ` · ${item.recordCountText}` : ""}
+                    {` · ${item.modeText}`}
                   </span>
                 </span>
                 <time className="history-time">{item.analyzedAtText}</time>

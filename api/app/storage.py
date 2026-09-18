@@ -94,6 +94,8 @@ def insert_analysis(
 
 def _row_to_summary(row: sqlite3.Row) -> dict:
     conclusion = json.loads(row["conclusion"])
+    # 无模式字段的旧记录一律按严格判定读取
+    analysis_mode = conclusion.get("analysisMode", "strict")
     return {
         "id": row["id"],
         "heatNo": row["heat_no"],
@@ -101,6 +103,7 @@ def _row_to_summary(row: sqlite3.Row) -> dict:
         "analyzedAt": row["analyzed_at"],
         "qualified": bool(conclusion.get("qualified")),
         "recordCount": conclusion.get("recordCount"),
+        "analysisMode": analysis_mode,
     }
 
 

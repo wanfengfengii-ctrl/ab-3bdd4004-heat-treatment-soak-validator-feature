@@ -37,12 +37,14 @@ h1 {
   padding: 1rem 1.25rem;
 }
 
-.upload input[type="text"] {
+.upload input[type="text"],
+.upload select {
   border: 1px solid #cfd4dc;
   border-radius: 8px;
   font-size: 0.95rem;
   padding: 0.45rem 0.6rem;
   width: 11rem;
+  background: #fff;
 }
 
 .layout {

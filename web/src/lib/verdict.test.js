@@ -2,13 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_FILE_BYTES,
+  MODE_LINEAR_EQUIVALENT,
+  MODE_STRICT,
   buildVerdict,
   formatDuration,
+  formatEquivalentSeconds,
   formatTimestamp,
   formatTimestampOrRaw,
+  modeLabel,
   parseJsonPreserveBigInts,
   validateFile,
 } from "./verdict";
+
+const row = (verdict, label) => verdict.rows.find((r) => r.label === label);
 
 describe("validateFile 上传预检", () => {
   it("无文件时拒绝", () => {
@@ -102,8 +108,9 @@ describe("buildVerdict 唯一结论", () => {
     });
     expect(verdict.status).toBe("qualified");
     expect(verdict.headline).toBe("保温合格");
-    const start = verdict.rows.find((r) => r.label === "达标段开始");
-    const end = verdict.rows.find((r) => r.label === "达标段结束");
+    expect(row(verdict, "判定方式").value).toBe("严格判定");
+    const start = row(verdict, "达标段开始");
+    const end = row(verdict, "达标段结束");
     expect(start.value).toBe("1970-01-01 00:00:00 UTC");
     expect(end.value).toBe("1970-01-01 00:30:00 UTC");
   });
@@ -116,8 +123,8 @@ describe("buildVerdict 唯一结论", () => {
     });
     expect(verdict.status).toBe("unqualified");
     expect(verdict.headline).toBe("保温不合格");
-    expect(verdict.rows[0].label).toBe("最长有效段时长");
-    expect(verdict.rows[0].value).toBe("270 秒（约 4.5 分钟）");
+    expect(row(verdict, "判定方式").value).toBe("严格判定");
+    expect(row(verdict, "最长有效段时长").value).toBe("270 秒（约 4.5 分钟）");
   });
 
   it("短时到温（无有效段）时长为 0", () => {
@@ -127,7 +134,7 @@ describe("buildVerdict 唯一结论", () => {
       longestSegment: null,
     });
     expect(verdict.status).toBe("unqualified");
-    expect(verdict.rows[0].value).toBe("0 秒（0 分钟）");
+    expect(row(verdict, "最长有效段时长").value).toBe("0 秒（0 分钟）");
   });
 
   it("qualified 但缺段数据时按不合格兜底", () => {
@@ -189,5 +196,141 @@ describe("buildVerdict 唯一结论", () => {
     expect(start.value).toBe("t = 100000000000000000000");
     expect(end.value).toBe("t = 100000000000000001800");
     expect(start.value).not.toBe(end.value);
+  });
+});
+
+describe("modeLabel / 默认判定模式", () => {
+  it("已知模式给出中文标签", () => {
+    expect(modeLabel(MODE_STRICT)).toBe("严格判定");
+    expect(modeLabel(MODE_LINEAR_EQUIVALENT)).toBe("线性曲线等效保温");
+  });
+
+  it("未知/缺失模式兜底为严格判定", () => {
+    expect(modeLabel("weird")).toBe("严格判定");
+    const verdict = buildVerdict({
+      qualified: false,
+      earliestQualifyingSegment: null,
+      longestSegment: null,
+    });
+    expect(verdict.mode).toBe(MODE_STRICT);
+  });
+});
+
+describe("formatEquivalentSeconds 等效秒", () => {
+  it("整数等效秒不带尾零", () => {
+    expect(formatEquivalentSeconds(1800)).toBe("1800 等效秒");
+  });
+  it("小数等效秒保留至多三位", () => {
+    expect(formatEquivalentSeconds(21.6404256)).toBe("21.64 等效秒");
+  });
+});
+
+describe("buildVerdict 线性曲线等效保温", () => {
+  const linearQualified = {
+    analysisMode: MODE_LINEAR_EQUIVALENT,
+    qualified: true,
+    earliestQualifyingSegment: {
+      startT: 0,
+      startOffset: 30,
+      endT: 1860,
+      endOffset: 0,
+      duration: 1830,
+      equivalentSeconds: 1821.6404,
+      slices: 61,
+      reachT: 1830,
+      reachOffset: 8.359574,
+    },
+    longestSegment: null,
+  };
+
+  it("合格时标注判定方式、段起点、首次达标时刻与等效秒", () => {
+    const verdict = buildVerdict(linearQualified);
+    expect(verdict.status).toBe("qualified");
+    expect(verdict.mode).toBe(MODE_LINEAR_EQUIVALENT);
+    expect(row(verdict, "判定方式").value).toBe("线性曲线等效保温");
+    expect(row(verdict, "达标段开始").value).toBe("1970-01-01 00:00:00 UTC +30 秒");
+    expect(row(verdict, "首次达标时刻").value).toBe(
+      "1970-01-01 00:30:30 UTC +8.36 秒",
+    );
+    expect(row(verdict, "累计等效保温").value).toBe("1821.64 等效秒");
+    // 不再出现严格模式的“达标段结束/达标段时长”行
+    expect(row(verdict, "达标段结束")).toBeUndefined();
+  });
+
+  it("偏移为 0 时不附偏移文本", () => {
+    const verdict = buildVerdict({
+      analysisMode: MODE_LINEAR_EQUIVALENT,
+      qualified: true,
+      earliestQualifyingSegment: {
+        startT: 0, startOffset: 0, endT: 900, endOffset: 0,
+        duration: 900, equivalentSeconds: 1800, slices: 31,
+        reachT: 900, reachOffset: 0,
+      },
+      longestSegment: null,
+    });
+    expect(row(verdict, "首次达标时刻").value).toBe("1970-01-01 00:15:00 UTC");
+  });
+
+  it("不合格时给出最长连续段等效保温", () => {
+    const verdict = buildVerdict({
+      analysisMode: MODE_LINEAR_EQUIVALENT,
+      qualified: false,
+      earliestQualifyingSegment: null,
+      longestSegment: {
+        startT: 0, startOffset: 10, endT: 30, endOffset: 0,
+        duration: 20, equivalentSeconds: 21.6404, slices: 1,
+      },
+    });
+    expect(verdict.status).toBe("unqualified");
+    expect(row(verdict, "判定方式").value).toBe("线性曲线等效保温");
+    expect(row(verdict, "最长连续段等效保温").value).toBe("21.64 等效秒");
+    expect(row(verdict, "连续段起点").value).toBe("1970-01-01 00:00:00 UTC +10 秒");
+    expect(row(verdict, "连续段时长").value).toBe("20 秒（约 0.3 分钟）");
+  });
+
+  it("不合格且无任何连续段时等效秒为 0", () => {
+    const verdict = buildVerdict({
+      analysisMode: MODE_LINEAR_EQUIVALENT,
+      qualified: false,
+      earliestQualifyingSegment: null,
+      longestSegment: null,
+    });
+    expect(verdict.status).toBe("unqualified");
+    expect(row(verdict, "最长连续段等效保温").value).toBe("0 等效秒");
+  });
+
+  it("超大锚点加十进制偏移不丢精度，退回原始锚点展示", () => {
+    const base = 100000000000000000000n;
+    const verdict = buildVerdict({
+      analysisMode: MODE_LINEAR_EQUIVALENT,
+      qualified: true,
+      earliestQualifyingSegment: {
+        startT: base, startOffset: 30, endT: base + 1800n, endOffset: 0,
+        duration: 1770, equivalentSeconds: 1800, slices: 60,
+        reachT: base + 1770n, reachOffset: 8.359,
+      },
+      longestSegment: null,
+    });
+    expect(row(verdict, "达标段开始").value).toBe(
+      "t = 100000000000000000000 +30 秒",
+    );
+    expect(row(verdict, "首次达标时刻").value).toBe(
+      "t = 100000000000000001770 +8.359 秒",
+    );
+  });
+
+  it("number 型超大锚点同样退回原始秒数且保留偏移", () => {
+    const base = 10_000_000_000_000;
+    const verdict = buildVerdict({
+      analysisMode: MODE_LINEAR_EQUIVALENT,
+      qualified: true,
+      earliestQualifyingSegment: {
+        startT: base, startOffset: 0, endT: base + 900, endOffset: 0,
+        duration: 900, equivalentSeconds: 1800, slices: 31,
+        reachT: base + 900, reachOffset: 0,
+      },
+      longestSegment: null,
+    });
+    expect(row(verdict, "首次达标时刻").value).toBe("t = 10000000000900");
   });
 });

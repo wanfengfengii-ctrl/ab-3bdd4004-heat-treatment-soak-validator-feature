@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from "react";
 
 import HistoryPanel from "./HistoryPanel";
 import { mapHistoryItems } from "./lib/history";
-import { buildVerdict, parseJsonPreserveBigInts, validateFile } from "./lib/verdict";
+import {
+  ANALYSIS_MODES,
+  MODE_STRICT,
+  buildVerdict,
+  parseJsonPreserveBigInts,
+  validateFile,
+} from "./lib/verdict";
 
 // 与后端 storage.RECENT_LIMIT 对应；列表顺序以后端分析时间倒序为准
 const HISTORY_FETCH_FAILED = "最近记录读取失败，当前分析结论不受影响，可稍后刷新重试。";
@@ -18,6 +24,8 @@ async function parseJsonOrNull(text) {
 export default function App() {
   const [file, setFile] = useState(null);
   const [heatNo, setHeatNo] = useState("");
+  // 上传判定模式：默认严格判定；回看历史结论不会改动这里的上传选择
+  const [analysisMode, setAnalysisMode] = useState(MODE_STRICT);
   const [verdict, setVerdict] = useState(null); // 唯一结论
   const [verdictSource, setVerdictSource] = useState(null); // 结论来源（历史回看时标注）
   const [error, setError] = useState(null);
@@ -63,6 +71,8 @@ export default function App() {
       form.append("file", file);
       // 炉次号可选：空串时后端按“未传/未填”处理，旧客户端行为不变
       if (heatNo.trim()) form.append("heat_no", heatNo.trim());
+      // 判定模式随上传提交：strict（默认）或 linear_equivalent
+      form.append("analysis_mode", analysisMode);
       const resp = await fetch("/api/analyze", { method: "POST", body: form });
       // 先取文本再自行解析：保留超出 JS 安全整数范围的时间戳（BigInt），
       // 避免 resp.json() 精度丢失把相差 1800 秒的起止舍入成同一时刻
@@ -95,6 +105,8 @@ export default function App() {
         heatNo: item.heatNo,
         filename: item.filename,
         analyzedAtText: item.analyzedAtText,
+        // 回看结论标明记录当时的判定模式，不改动上传选择
+        modeText: item.modeText,
       });
       setError(null);
     } catch {
@@ -110,8 +122,10 @@ export default function App() {
       <h1>淬火炉保温段验收</h1>
       <p className="hint">
         上传温度记录 JSON（根为数组，每项含整数秒时间戳 <code>t</code> 与摄氏温度{" "}
-        <code>temp</code>）。判定标准：温度连续落在 840–860&nbsp;°C、相邻采样间隔不超过
-        60 秒、段持续时长达到 1800 秒。
+        <code>temp</code>）。默认采用<strong>严格判定</strong>：温度连续落在
+        840–860&nbsp;°C、相邻采样间隔不超过 60 秒、段持续时长达到 1800 秒。边界附近
+        缓慢升温的炉次可改选<strong>线性曲线等效保温</strong>：按线段裁剪带内时间片，
+        对 <code>2^((温度-850)/10)</code> 按时间积分，连续段累计等效秒达 1800 即合格。
       </p>
 
       <div className="layout">
@@ -134,6 +148,19 @@ export default function App() {
               placeholder="返工复测可重复填写"
               onChange={(e) => setHeatNo(e.target.value)}
             />
+            <label htmlFor="analysis-mode">判定方式</label>
+            <select
+              id="analysis-mode"
+              data-testid="analysis-mode"
+              value={analysisMode}
+              onChange={(e) => setAnalysisMode(e.target.value)}
+            >
+              {ANALYSIS_MODES.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
             <button type="submit" disabled={loading}>
               {loading ? "分析中…" : "上传并分析"}
             </button>
@@ -157,7 +184,8 @@ export default function App() {
                 <p className="verdict-source" data-testid="verdict-source">
                   回看历史记录
                   {verdictSource.heatNo ? `：炉次 ${verdictSource.heatNo}` : ""}
-                  {`（${verdictSource.filename}，${verdictSource.analyzedAtText}）`}
+                  {`（${verdictSource.filename}，${verdictSource.analyzedAtText}，` +
+                    `${verdictSource.modeText}）`}
                 </p>
               )}
               <dl>

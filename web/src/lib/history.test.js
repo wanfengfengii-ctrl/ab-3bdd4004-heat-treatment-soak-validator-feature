@@ -33,9 +33,41 @@ describe("mapHistoryItems 列表映射", () => {
       filename: "run-7.json",
       qualified: true,
       statusText: "合格",
+      mode: "strict",
+      modeText: "严格判定",
+      isLinearEquivalent: false,
       recordCountText: "61 条记录",
       analyzedAtText: "1970-01-01 00:00:00 UTC",
     });
+  });
+
+  it("线性等效模式记录标明判定方式", () => {
+    const item = mapHistoryItem({
+      id: 3,
+      heatNo: "H-LIN",
+      filename: "lin.json",
+      analyzedAt: 0,
+      qualified: true,
+      recordCount: 100,
+      analysisMode: "linear_equivalent",
+    });
+    expect(item.mode).toBe("linear_equivalent");
+    expect(item.modeText).toBe("线性曲线等效保温");
+    expect(item.isLinearEquivalent).toBe(true);
+  });
+
+  it("无 analysisMode 的旧记录按严格判定读取", () => {
+    const item = mapHistoryItem({
+      id: 1,
+      heatNo: null,
+      filename: "legacy.json",
+      analyzedAt: 0,
+      qualified: true,
+      recordCount: 61,
+    });
+    expect(item.mode).toBe("strict");
+    expect(item.modeText).toBe("严格判定");
+    expect(item.isLinearEquivalent).toBe(false);
   });
 
   it("未填炉次号的记录有明确占位", () => {
