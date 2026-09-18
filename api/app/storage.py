@@ -94,6 +94,8 @@ def insert_analysis(
 
 def _row_to_summary(row: sqlite3.Row) -> dict:
     conclusion = json.loads(row["conclusion"])
+    # 无 analysisMode 字段的旧记录一律按严格判定读取
+    mode = conclusion.get("analysisMode") or "strict"
     return {
         "id": row["id"],
         "heatNo": row["heat_no"],
@@ -101,6 +103,7 @@ def _row_to_summary(row: sqlite3.Row) -> dict:
         "analyzedAt": row["analyzed_at"],
         "qualified": bool(conclusion.get("qualified")),
         "recordCount": conclusion.get("recordCount"),
+        "analysisMode": mode,
     }
 
 
@@ -125,10 +128,14 @@ def get_by_id(conn: sqlite3.Connection, record_id: int) -> dict | None:
     ).fetchone()
     if row is None:
         return None
+    conclusion = json.loads(row["conclusion"])
+    # 无模式的旧记录回看时按严格判定标明
+    if not conclusion.get("analysisMode"):
+        conclusion["analysisMode"] = "strict"
     return {
         "id": row["id"],
         "heatNo": row["heat_no"],
         "filename": row["filename"],
         "analyzedAt": row["analyzed_at"],
-        "conclusion": json.loads(row["conclusion"]),
+        "conclusion": conclusion,
     }

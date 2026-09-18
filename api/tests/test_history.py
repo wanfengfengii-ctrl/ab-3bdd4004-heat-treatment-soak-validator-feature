@@ -19,10 +19,12 @@ def unqualified_series():
     return [{"t": i * 30, "temp": 850} for i in range(10)]  # 270 秒，不合格
 
 
-def upload(client_obj, records, filename="data.json", heat_no=None):
+def upload(client_obj, records, filename="data.json", heat_no=None, mode=None):
     body = json.dumps(records).encode("utf-8")
     files = {"file": (filename, body, "application/json")}
     data = {"heat_no": heat_no} if heat_no is not None else {}
+    if mode is not None:
+        data["analysis_mode"] = mode
     return client_obj.post("/api/analyze", files=files, data=data)
 
 
@@ -204,8 +206,11 @@ def test_history_summary_shape(client):
     item = c.get("/api/history").json()["items"][0]
     assert set(item.keys()) == {
         "id", "heatNo", "filename", "analyzedAt", "qualified", "recordCount",
+        "analysisMode",
     }
     assert item["recordCount"] == 61
+    # 默认严格判定，摘要标明判定方式
+    assert item["analysisMode"] == "strict"
 
 
 def test_write_failure_returns_clear_error_and_no_partial_record(client, monkeypatch):
@@ -292,3 +297,96 @@ def test_reopen_database_history_survives_new_connection(client):
         assert item["conclusion"]["qualified"] is True
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# analysis_mode 历史回看
+# ---------------------------------------------------------------------------
+
+
+def linear_qualified_payload():
+    """strict 不合格、linear 合格的低温穿入炉次（与 test_api 同一形状）。"""
+    records = [{"t": 0, "temp": 835}, {"t": 60, "temp": 850}]
+    t = 90
+    while t <= 1830:
+        records.append({"t": t, "temp": 850})
+        t += 30
+    records.append({"t": 1832, "temp": 850})
+    return records
+
+
+def test_linear_upload_persisted_with_mode_and_equivalent_seconds(client):
+    c, _ = client
+    resp = upload(
+        c, linear_qualified_payload(), "linear.json",
+        heat_no="H-LIN", mode="linear_equivalent",
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["qualified"] is True
+    assert data["analysisMode"] == "linear_equivalent"
+    seg = data["earliestQualifyingSegment"]
+    assert abs(seg["equivalentSeconds"] - 1800.0) < 1e-9
+
+    # 摘要标明判定方式为线性等效
+    item = c.get("/api/history").json()["items"][0]
+    assert item["analysisMode"] == "linear_equivalent"
+    assert item["qualified"] is True
+
+
+def test_linear_history_detail_restores_mode_and_anchors(client):
+    c, _ = client
+    resp = upload(
+        c, linear_qualified_payload(), "linear.json",
+        heat_no="H-LIN2", mode="linear_equivalent",
+    )
+    history_id = resp.json()["historyId"]
+    detail = c.get(f"/api/history/{history_id}").json()
+    conclusion = detail["conclusion"]
+    assert conclusion["analysisMode"] == "linear_equivalent"
+    seg = conclusion["earliestQualifyingSegment"]
+    assert seg["startAnchorT"] == 0
+    assert abs(seg["startOffset"] - 20.0) < 0.001
+    assert abs(seg["equivalentSeconds"] - 1800.0) < 1e-9
+
+
+def test_legacy_record_without_mode_read_as_strict(client):
+    """无 analysisMode 的旧记录：摘要与详情都按严格判定标明。"""
+    c, db_path = client
+    # 先按新代码写一条 strict（结论带 analysisMode），再模拟更旧的无模式记录
+    upload(c, qualified_series(), "new.json", heat_no="H-NEW")
+    legacy_conclusion = {
+        "recordCount": 61,
+        "segmentCount": 1,
+        "qualified": True,
+        "earliestQualifyingSegment": {
+            "startT": 0, "endT": 1800, "duration": 1800, "points": 61,
+        },
+        "longestSegment": {
+            "startT": 0, "endT": 1800, "duration": 1800, "points": 61,
+        },
+        "limits": {
+            "tempLow": 840.0, "tempHigh": 860.0,
+            "maxGapSeconds": 60, "minSoakSeconds": 1800,
+        },
+    }
+    conn = storage.connect(db_path)
+    try:
+        storage.insert_analysis(
+            conn,
+            heat_no="H-LEGACY",
+            filename="legacy-no-mode.json",
+            conclusion=legacy_conclusion,
+        )
+    finally:
+        conn.close()
+
+    items = c.get("/api/history").json()["items"]
+    legacy_item = next(i for i in items if i["heatNo"] == "H-LEGACY")
+    # 无模式旧记录按严格判定读取
+    assert legacy_item["analysisMode"] == "strict"
+
+    detail = c.get(f"/api/history/{legacy_item['id']}").json()
+    assert detail["conclusion"]["analysisMode"] == "strict"
+    # 旧结论的 strict 段字段保持原样可读
+    assert detail["conclusion"]["earliestQualifyingSegment"]["endT"] == 1800

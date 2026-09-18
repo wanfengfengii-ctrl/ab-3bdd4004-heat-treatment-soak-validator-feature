@@ -2,7 +2,14 @@ import { useEffect, useRef, useState } from "react";
 
 import HistoryPanel from "./HistoryPanel";
 import { mapHistoryItems } from "./lib/history";
-import { buildVerdict, parseJsonPreserveBigInts, validateFile } from "./lib/verdict";
+import {
+  MODE_LINEAR,
+  MODE_STRICT,
+  buildVerdict,
+  modeLabel,
+  parseJsonPreserveBigInts,
+  validateFile,
+} from "./lib/verdict";
 
 // 与后端 storage.RECENT_LIMIT 对应；列表顺序以后端分析时间倒序为准
 const HISTORY_FETCH_FAILED = "最近记录读取失败，当前分析结论不受影响，可稍后刷新重试。";
@@ -18,6 +25,7 @@ async function parseJsonOrNull(text) {
 export default function App() {
   const [file, setFile] = useState(null);
   const [heatNo, setHeatNo] = useState("");
+  const [analysisMode, setAnalysisMode] = useState(MODE_STRICT); // 上传选择，默认严格判定
   const [verdict, setVerdict] = useState(null); // 唯一结论
   const [verdictSource, setVerdictSource] = useState(null); // 结论来源（历史回看时标注）
   const [error, setError] = useState(null);
@@ -61,6 +69,8 @@ export default function App() {
     try {
       const form = new FormData();
       form.append("file", file);
+      // 当前页面选择的判定方式：strict 也显式上送，后端缺省同样按严格判定
+      form.append("analysis_mode", analysisMode);
       // 炉次号可选：空串时后端按“未传/未填”处理，旧客户端行为不变
       if (heatNo.trim()) form.append("heat_no", heatNo.trim());
       const resp = await fetch("/api/analyze", { method: "POST", body: form });
@@ -110,8 +120,9 @@ export default function App() {
       <h1>淬火炉保温段验收</h1>
       <p className="hint">
         上传温度记录 JSON（根为数组，每项含整数秒时间戳 <code>t</code> 与摄氏温度{" "}
-        <code>temp</code>）。判定标准：温度连续落在 840–860&nbsp;°C、相邻采样间隔不超过
-        60 秒、段持续时长达到 1800 秒。
+        <code>temp</code>）。严格判定要求温度连续落在 840–860&nbsp;°C、相邻采样间隔不超过
+        60 秒、段持续时长达到 1800 秒；边界附近缓慢升温的炉次可改用“线性曲线等效保温”，
+        按 <code>2^((温度-850)/10)</code> 对带内时间积分，累计等效秒达到 1800 即合格。
       </p>
 
       <div className="layout">
@@ -134,6 +145,35 @@ export default function App() {
               placeholder="返工复测可重复填写"
               onChange={(e) => setHeatNo(e.target.value)}
             />
+            <label>判定方式</label>
+            <div className="mode-switch" role="radiogroup" aria-label="判定方式">
+              <label className="mode-option">
+                <input
+                  type="radio"
+                  name="analysis-mode"
+                  value={MODE_STRICT}
+                  checked={analysisMode === MODE_STRICT}
+                  onChange={() => setAnalysisMode(MODE_STRICT)}
+                />
+                <span>
+                  <strong>严格判定</strong>
+                  <small>采样点须全程落在 840–860 °C</small>
+                </span>
+              </label>
+              <label className="mode-option">
+                <input
+                  type="radio"
+                  name="analysis-mode"
+                  value={MODE_LINEAR}
+                  checked={analysisMode === MODE_LINEAR}
+                  onChange={() => setAnalysisMode(MODE_LINEAR)}
+                />
+                <span>
+                  <strong>线性曲线等效保温</strong>
+                  <small>相邻点线性插值，带内按 2^((T-850)/10) 积分</small>
+                </span>
+              </label>
+            </div>
             <button type="submit" disabled={loading}>
               {loading ? "分析中…" : "上传并分析"}
             </button>
@@ -153,6 +193,11 @@ export default function App() {
               aria-live="polite"
             >
               <h2 data-testid="verdict-headline">{verdict.headline}</h2>
+              <p className="verdict-mode" data-testid="verdict-mode">
+                {verdictSource
+                  ? `历史记录判定方式：${modeLabel(verdict.mode)}`
+                  : `判定方式：${modeLabel(verdict.mode)}`}
+              </p>
               {verdictSource && (
                 <p className="verdict-source" data-testid="verdict-source">
                   回看历史记录

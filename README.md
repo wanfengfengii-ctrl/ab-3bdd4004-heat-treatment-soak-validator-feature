@@ -6,12 +6,34 @@
 
 ## 判定规则
 
+上传前可在页面选择判定方式（`analysis_mode`），默认仍为**严格判定**：
+
+### 严格判定（strict，默认）
+
 - 有效保温段由**连续记录**构成：每条温度都落在闭区间 **840–860 °C**，且任意
   相邻记录时间差不超过 **60 秒**；一次越界或超间隔立即切段。
 - 段持续时间 = 末项 `t` − 首项 `t`，达到 **1800 秒**即合格。
-- 页面只显示**唯一结论**：
-  - 合格 → 给出**最早达标段**的起止时间；
-  - 不合格 → 给出**最长有效段**的时长。
+
+### 线性曲线等效保温（linear_equivalent）
+
+边界附近缓慢升温的炉次会被严格判定的离散采样点“切段”，丢掉已经在带内的有效
+时段。等效模式改为：
+
+- 把**相邻间隔不超过 60 秒**的采样点连成线段，**带外区间**或**超限间隔**结束连续段；
+  共享采样点本身越界时，两侧片段之间隔着带外时间，同样切段。
+- 裁剪出每条线段温度位于闭区间 840–860 °C 的时间片，落在边界的相邻片按同一
+  时刻拼接（相接点零长度，不重复计时）。
+- 对片内权重 **2^((温度−850)/10)** 按时间积分；恒温片按常量积分。连续段累计
+  **等效秒达到 1800 即合格**，取最早达标段，并用指数积分的**解析反函数**求首次
+  达标时刻。
+- 插值时刻用**整数锚点时间戳 + 十进制秒偏移**表示（`startAnchorT/startOffset`、
+  `endAnchorT/endOffset`），所有浮点运算只在 0–60 秒的局部偏移上进行，避免超大
+  时间戳丢精度；段快照同时给出 `equivalentSeconds`（等效秒）与 `physicalSeconds`。
+
+两种模式下页面都只显示**唯一结论**：
+
+- 合格 → 给出**最早达标段**的起止（线性模式为起点与首次达标时刻、累计等效秒）；
+- 不合格 → 给出**最长有效段**的时长（线性模式为最长连续段等效秒）。
 
 ## 上传文件要求（任一不满足即整份拒绝并清除旧结果）
 
@@ -31,10 +53,10 @@
 ```
 compose.yaml          # 一键启动：api + web + verify（api 的 SQLite 在命名卷 api-history）
 api/                  # FastAPI 后端
-  app/soak.py         #   解析校验 + 保温段判定（纯函数）
+  app/soak.py         #   解析校验 + 保温段判定（strict 与线性曲线等效，纯函数）
   app/storage.py      #   SQLite 历史记录读写（成功分析落库、最近二十条、按 id 恢复）
   app/main.py         #   POST /api/analyze、GET /api/history、GET /api/history/{id}
-  tests/              #   pytest：解析、区间判定、临时库持久化与兼容判据
+  tests/              #   pytest：解析、区间判定、线性等效积分/反函数、临时库持久化与兼容判据
 web/                  # React (Vite) 前端
   src/lib/verdict.js  #   分析结果 → 唯一结论视图模型
   src/lib/history.js  #   最近记录摘要 → 列表视图模型
@@ -78,13 +100,20 @@ WEB_PORT=8080 npx playwright test
 
 ## API
 
-`POST /api/analyze`（multipart 字段 `file`，可选字段 `heat_no` 炉次号）
+`POST /api/analyze`（multipart 字段 `file`，可选字段 `heat_no` 炉次号、
+`analysis_mode` 判定方式）
 
-- `200`：`{ qualified, earliestQualifyingSegment, longestSegment, recordCount, ..., historyId }`
-  —— **只有校验通过的成功分析**才写入本地 SQLite，并在原响应中追加记录标识
-  `historyId`；不带 `heat_no` 的旧客户端请求行为完全不变。
+- `analysis_mode` 取 `strict`（默认）或 `linear_equivalent`；缺省/空串/不带该
+  字段的旧请求一律按严格判定，行为与旧版完全一致。
+- 未知模式**先于文件解析**返回 `422`（`code: "unknown_analysis_mode"`），
+  不读取落库、并由前端清除旧结论。
+- `200`：strict 返回 `{ qualified, earliestQualifyingSegment, longestSegment,
+  recordCount, analysisMode, ..., historyId }`；linear 的段快照为
+  `{ startAnchorT, startOffset, endAnchorT, endOffset, equivalentSeconds,
+  physicalSeconds, points }` —— **只有校验通过的成功分析**才写入本地 SQLite，
+  并在原响应中追加 `historyId`。
 - `422`：`{ detail: { code, message } }` —— 格式错误、缺字段、乱序、非有限值、
-  记录数或文件大小超限等，**整份拒绝且不留历史**。
+  记录数或文件大小超限、未知判定方式等，**整份拒绝且不留历史**。
 - `500`：`{ detail: { code: "history_write_failed"|"history_unavailable", message } }`
   —— 持久化失败时本次分析返回明确错误，响应体不含未落库结论。
 
@@ -93,8 +122,11 @@ WEB_PORT=8080 npx playwright test
 ```json
 { "items": [
   { "id": 3, "heatNo": "H-2026-001", "filename": "a.json",
-    "analyzedAt": 1789000205.4, "qualified": true, "recordCount": 61 } ] }
+    "analyzedAt": 1789000205.4, "qualified": true, "recordCount": 61,
+    "analysisMode": "linear_equivalent" } ] }
 ```
+
+摘要与回看结论都带 `analysisMode`；**无该字段的旧记录按严格判定**读取与展示。
 
 `GET /api/history/{id}` —— 恢复一条记录当时的**完整结论**（用于驱动唯一结论）；
 不存在返回 `404`。历史查询失败（5xx/网络问题）只在页面“最近记录”区域提示，

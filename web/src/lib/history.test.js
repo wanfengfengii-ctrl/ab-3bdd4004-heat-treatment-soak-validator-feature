@@ -12,6 +12,7 @@ describe("mapHistoryItems 列表映射", () => {
         analyzedAt: 0,
         qualified: true,
         recordCount: 61,
+        analysisMode: "linear_equivalent",
       },
       {
         id: 6,
@@ -33,8 +34,15 @@ describe("mapHistoryItems 列表映射", () => {
       filename: "run-7.json",
       qualified: true,
       statusText: "合格",
+      analysisMode: "linear_equivalent",
+      modeText: "等效保温",
       recordCountText: "61 条记录",
       analyzedAtText: "1970-01-01 00:00:00 UTC",
+    });
+    expect(items[1]).toMatchObject({
+      id: 6,
+      analysisMode: "strict",
+      modeText: "严格判定",
     });
   });
 
@@ -50,6 +58,19 @@ describe("mapHistoryItems 列表映射", () => {
     expect(item.heatNo).toBeNull();
     expect(item.title).toBe("未填炉次号");
     expect(item.statusText).toBe("不合格");
+  });
+
+  it("无 analysisMode 的旧记录按严格判定标明", () => {
+    const item = mapHistoryItem({
+      id: 1,
+      heatNo: "H-OLD",
+      filename: "old.json",
+      analyzedAt: 0,
+      qualified: true,
+      recordCount: 61,
+    });
+    expect(item.analysisMode).toBe("strict");
+    expect(item.modeText).toBe("严格判定");
   });
 
   it("空白炉次号与空文件名安全兜底", () => {

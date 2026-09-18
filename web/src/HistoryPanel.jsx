@@ -53,6 +53,12 @@ export default function HistoryPanel({ state, onSelect }) {
                 <span className="history-main">
                   <span className="history-name">{item.title}</span>
                   <span className="history-meta">
+                    <span
+                      className={`mode-tag ${item.analysisMode === "linear_equivalent" ? "linear" : "strict"}`}
+                      data-testid="history-mode"
+                    >
+                      {item.modeText}
+                    </span>
                     {item.filename}
                     {item.recordCountText ? ` · ${item.recordCountText}` : ""}
                   </span>

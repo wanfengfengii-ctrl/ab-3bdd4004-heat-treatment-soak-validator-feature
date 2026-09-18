@@ -17,6 +17,7 @@ const sampleItems = mapHistoryItems([
     analyzedAt: 1800,
     qualified: false,
     recordCount: 10,
+    analysisMode: "linear_equivalent",
   },
   {
     id: 1,
@@ -51,6 +52,9 @@ describe("HistoryPanel 列表渲染", () => {
     expect(html).toContain("合格");
     expect(html).toContain("10 条记录");
     expect(html).toContain("61 条记录");
+    // 判定方式标记：线性记录与旧记录（按严格判定）分别标明
+    expect(html).toContain("等效保温");
+    expect(html).toContain("严格判定");
     // data-id 透传，供点击恢复使用
     expect(html).toContain('data-id="2"');
     expect(html).toContain('data-id="1"');

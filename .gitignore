@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.venv/
 
 # 本地运行时的 SQLite 历史库（容器内位于命名卷 /app/data）
 api/data/
@@ -11,6 +12,7 @@ api/data/
 # Node / 前端产物
 node_modules/
 dist/
+.npm-cache/
 
 # Playwright
 e2e/test-results/

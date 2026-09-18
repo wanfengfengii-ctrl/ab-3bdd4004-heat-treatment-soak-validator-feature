@@ -2,11 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_FILE_BYTES,
+  MODE_LINEAR,
+  MODE_STRICT,
   buildVerdict,
   formatDuration,
+  formatEquivalent,
+  formatOffset,
   formatTimestamp,
   formatTimestampOrRaw,
+  modeLabel,
   parseJsonPreserveBigInts,
+  resolveAnalysisMode,
   validateFile,
 } from "./verdict";
 
@@ -189,5 +195,150 @@ describe("buildVerdict 唯一结论", () => {
     expect(start.value).toBe("t = 100000000000000000000");
     expect(end.value).toBe("t = 100000000000000001800");
     expect(start.value).not.toBe(end.value);
+  });
+});
+
+describe("resolveAnalysisMode / modeLabel", () => {
+  it("linear_equivalent 识别为线性模式", () => {
+    expect(resolveAnalysisMode({ analysisMode: "linear_equivalent" })).toBe(MODE_LINEAR);
+  });
+
+  it("strict、缺字段、未知值与空对象一律按严格判定", () => {
+    expect(resolveAnalysisMode({ analysisMode: "strict" })).toBe(MODE_STRICT);
+    expect(resolveAnalysisMode({})).toBe(MODE_STRICT);
+    expect(resolveAnalysisMode(null)).toBe(MODE_STRICT);
+    expect(resolveAnalysisMode({ analysisMode: "weird" })).toBe(MODE_STRICT);
+  });
+
+  it("模式文案", () => {
+    expect(modeLabel(MODE_STRICT)).toBe("严格判定");
+    expect(modeLabel(MODE_LINEAR)).toBe("线性曲线等效保温");
+  });
+});
+
+describe("formatOffset / formatEquivalent", () => {
+  it("秒偏移保留至多三位小数并去尾零", () => {
+    expect(formatOffset(0)).toBe("0");
+    expect(formatOffset(10)).toBe("10");
+    expect(formatOffset(15.428607)).toBe("15.429");
+    expect(formatOffset(15.4)).toBe("15.4");
+  });
+
+  it("非法偏移兜底为 0", () => {
+    expect(formatOffset(undefined)).toBe("0");
+    expect(formatOffset(NaN)).toBe("0");
+  });
+
+  it("等效秒文案", () => {
+    expect(formatEquivalent(1800)).toBe("1800 等效秒（30 分钟）");
+    expect(formatEquivalent(43.280851)).toBe("43.281 等效秒（约 0.7 分钟）");
+  });
+});
+
+describe("buildVerdict 线性曲线等效保温", () => {
+  const linearQualified = {
+    analysisMode: "linear_equivalent",
+    qualified: true,
+    earliestQualifyingSegment: {
+      startAnchorT: 0,
+      startOffset: 20,
+      endAnchorT: 1830,
+      endOffset: 9.854,
+      equivalentSeconds: 1800,
+      physicalSeconds: 1819.854,
+      points: 61,
+    },
+    longestSegment: null,
+  };
+
+  it("合格时给出锚点+偏移的开始与首次达标时刻、累计等效秒", () => {
+    const v = buildVerdict(linearQualified);
+    expect(v.mode).toBe(MODE_LINEAR);
+    expect(v.status).toBe("qualified");
+    const start = v.rows.find((r) => r.label === "达标段开始");
+    const hit = v.rows.find((r) => r.label === "首次达标时刻");
+    const eq = v.rows.find((r) => r.label === "累计等效秒");
+    expect(start.value).toBe("1970-01-01 00:00:00 UTC + 20 秒");
+    expect(hit.value).toBe("1970-01-01 00:30:30 UTC + 9.854 秒");
+    expect(hit.raw).toBeUndefined();
+    expect(eq.value).toBe("1800 等效秒（30 分钟）");
+    const physical = v.rows.find((r) => r.label === "段内物理时长");
+    expect(physical.value).toContain("1819.854");
+  });
+
+  it("偏移为 0 时不追加偏移后缀，仍附原始锚点", () => {
+    const v = buildVerdict({
+      analysisMode: "linear_equivalent",
+      qualified: true,
+      earliestQualifyingSegment: {
+        startAnchorT: 0, startOffset: 0,
+        endAnchorT: 900, endOffset: 0,
+        equivalentSeconds: 1800, physicalSeconds: 900, points: 16,
+      },
+      longestSegment: null,
+    });
+    const start = v.rows.find((r) => r.label === "达标段开始");
+    expect(start.value).toBe("1970-01-01 00:00:00 UTC");
+    expect(start.raw).toBe(0);
+  });
+
+  it("不合格时给出最长连续段等效秒与锚点区间", () => {
+    const v = buildVerdict({
+      analysisMode: "linear_equivalent",
+      qualified: false,
+      earliestQualifyingSegment: null,
+      longestSegment: {
+        startAnchorT: 0, startOffset: 10,
+        endAnchorT: 0, endOffset: 50,
+        equivalentSeconds: 43.280851, physicalSeconds: 40, points: 2,
+      },
+    });
+    expect(v.mode).toBe(MODE_LINEAR);
+    expect(v.status).toBe("unqualified");
+    expect(v.rows[0].label).toBe("最长连续段等效秒");
+    expect(v.rows[0].value).toBe("43.281 等效秒（约 0.7 分钟）");
+    const range = v.rows.find((r) => r.label === "最长连续段区间");
+    expect(range.value).toContain("1970-01-01 00:00:00 UTC + 10 秒");
+    expect(range.value).toContain("+ 50 秒");
+  });
+
+  it("无任何连续段时等效秒为 0", () => {
+    const v = buildVerdict({
+      analysisMode: "linear_equivalent",
+      qualified: false,
+      earliestQualifyingSegment: null,
+      longestSegment: null,
+    });
+    expect(v.rows[0].value).toBe("0 等效秒（0 分钟）");
+  });
+
+  it("超大 BigInt 锚点 + 十进制偏移精确保留", () => {
+    const base = 100000000000000000000n;
+    const v = buildVerdict({
+      analysisMode: "linear_equivalent",
+      qualified: true,
+      earliestQualifyingSegment: {
+        startAnchorT: base, startOffset: 10,
+        endAnchorT: base, endOffset: 50,
+        equivalentSeconds: 43.280851, physicalSeconds: 40, points: 2,
+      },
+      longestSegment: null,
+    });
+    const start = v.rows.find((r) => r.label === "达标段开始");
+    const hit = v.rows.find((r) => r.label === "首次达标时刻");
+    expect(start.value).toBe("t = 100000000000000000000 + 10 秒");
+    expect(hit.value).toBe("t = 100000000000000000000 + 50 秒");
+  });
+});
+
+describe("buildVerdict 旧记录无模式按严格判定", () => {
+  it("缺 analysisMode 的合格结论按 strict 字段渲染", () => {
+    const v = buildVerdict({
+      qualified: true,
+      earliestQualifyingSegment: { startT: 0, endT: 1800, duration: 1800, points: 61 },
+      longestSegment: null,
+    });
+    expect(v.mode).toBe(MODE_STRICT);
+    expect(v.rows.find((r) => r.label === "达标段时长").value).toBe("1800 秒（30 分钟）");
   });
 });

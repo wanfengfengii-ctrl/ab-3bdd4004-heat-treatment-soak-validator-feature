@@ -1,6 +1,8 @@
 // 纯函数：把“最近记录”接口的摘要映射为页面列表视图模型。
 // 与上传分析流程完全解耦：历史查询失败只影响列表区域，不触碰当前结论。
 
+import { modeShortLabel } from "./verdict";
+
 /**
  * 服务端分析时间（epoch 秒）→ "2026-09-14 08:30:05 UTC"；
  * 缺失或非法时返回兜底文本，任何输入都不抛异常。
@@ -23,13 +25,20 @@ export function formatAnalyzedAt(epochSeconds) {
 export function mapHistoryItem(item) {
   const heatNo = item.heatNo == null ? null : String(item.heatNo);
   const count = item.recordCount == null ? NaN : Number(item.recordCount);
+  // 无 analysisMode 的旧记录按严格判定读取
+  const mode =
+    item.analysisMode === "linear_equivalent"
+      ? "linear_equivalent"
+      : "strict";
   return {
     id: item.id,
     heatNo,
+    analysisMode: mode,
     title: heatNo ? `炉次 ${heatNo}` : "未填炉次号",
     filename: item.filename || "未知文件",
     qualified: Boolean(item.qualified),
     statusText: item.qualified ? "合格" : "不合格",
+    modeText: modeShortLabel(mode),
     recordCountText: Number.isFinite(count) ? `${count} 条记录` : "",
     analyzedAtText: formatAnalyzedAt(item.analyzedAt),
   };
